@@ -36,7 +36,7 @@ init_db()
 # ==========================================
 # 1. 서비스 전용 접속 비밀번호 설정
 # ==========================================
-ACCESS_PASSWORD = "my_secret_password123!"  # <-- 필요시 원하는 비밀번호로 변경하세요
+ACCESS_PASSWORD = "wqlab"  # <-- 필요시 원하는 비밀번호로 변경하세요
 
 if "is_master_auth" not in st.session_state:
     st.session_state.is_master_auth = False
