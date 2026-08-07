@@ -20,7 +20,7 @@ CONFIG_FILE = "user_config.json"
 # ==========================================
 # 0. 서비스 전용 접속 비밀번호 설정 (원하시는 값으로 변경하세요)
 # ==========================================
-ACCESS_PASSWORD = "my_secret_password123!"  # <-- 이 부분을 원하는 비밀번호로 바꾸세요!
+ACCESS_PASSWORD = "wqlab"  # <-- 이 부분을 원하는 비밀번호로 바꾸세요!
 
 if "is_master_auth" not in st.session_state:
     st.session_state.is_master_auth = False
