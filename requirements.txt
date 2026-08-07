@@ -2,3 +2,5 @@ streamlit
 google-genai
 anthropic
 python-docx
+beautifulsoup4
+requests
