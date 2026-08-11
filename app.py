@@ -302,12 +302,18 @@ with tab_main:
                             full_text = ""
 
                             for round_i in range(MAX_CONTINUATION_ROUNDS):
-                                res = claude_client.messages.create(
+                                # max_tokens가 커서 10분 이상 걸릴 수 있으므로
+                                # non-streaming 대신 streaming 방식으로 호출합니다.
+                                with claude_client.messages.stream(
                                     model=st.session_state.claude_model,
                                     max_tokens=MAX_OUTPUT_TOKENS_CLAUDE,
                                     system=sys_prompt,
                                     messages=messages
-                                )
+                                ) as stream:
+                                    for _ in stream.text_stream:
+                                        pass  # 텍스트는 최종 메시지에서 한 번에 가져옴
+                                    res = stream.get_final_message()
+
                                 chunk_text = "\n".join(
                                     [b.text for b in res.content if getattr(b, 'type', None) == 'text']
                                 )
