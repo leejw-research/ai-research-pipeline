@@ -94,6 +94,14 @@ if "claude_model" not in st.session_state:
 if "final_output" not in st.session_state:
     st.session_state.final_output = ""
 
+# ==========================================
+# 2-1. 출력 토큰 한도 설정 (잘림 방지 핵심)
+# ==========================================
+# 필요에 따라 늘릴 수 있습니다. Claude Sonnet 5는 최대 128000까지 지원합니다.
+MAX_OUTPUT_TOKENS_GEMINI = 32000
+MAX_OUTPUT_TOKENS_CLAUDE = 32000
+MAX_CONTINUATION_ROUNDS = 3  # 한 번 더 잘려도 최대 몇 번까지 이어받을지
+
 # URL 텍스트 추출 함수
 def get_url_text(url):
     try:
@@ -239,19 +247,44 @@ with tab_main:
                 gemini_client = genai.Client(api_key=st.session_state.gemini_api_key)
                 claude_client = Anthropic(api_key=st.session_state.claude_api_key)
 
+                # ------------------------------------------------
+                # Gemini 호출 (잘림 감지 + 자동 이어받기)
+                # ------------------------------------------------
                 def safe_call_gemini(contents_payload, sys_prompt):
                     for attempt in range(1, 6):
                         try:
-                            res = gemini_client.models.generate_content(
-                                model=st.session_state.gemini_model,
-                                contents=contents_payload,
-                                config=types.GenerateContentConfig(
-                                    system_instruction=sys_prompt,
-                                    temperature=0.7,
-                                    max_output_tokens=8000,
+                            full_text = ""
+                            current_contents = contents_payload
+                            for round_i in range(MAX_CONTINUATION_ROUNDS):
+                                res = gemini_client.models.generate_content(
+                                    model=st.session_state.gemini_model,
+                                    contents=current_contents,
+                                    config=types.GenerateContentConfig(
+                                        system_instruction=sys_prompt,
+                                        temperature=0.7,
+                                        max_output_tokens=MAX_OUTPUT_TOKENS_GEMINI,
+                                    )
                                 )
-                            )
-                            return res.text
+                                chunk_text = res.text or ""
+                                full_text += chunk_text
+
+                                finish_reason = None
+                                if getattr(res, "candidates", None):
+                                    finish_reason = str(res.candidates[0].finish_reason)
+
+                                if finish_reason == "MAX_TOKENS":
+                                    status_container.write(f"✂️ Gemini 응답이 길어 이어서 생성 중... ({round_i + 1}회차)")
+                                    current_contents = (
+                                        f"{contents_payload}\n\n"
+                                        f"[이전까지 작성된 내용]\n{full_text}\n\n"
+                                        f"위 내용에 이어서, 끊긴 부분부터 자연스럽게 계속 작성해줘. "
+                                        f"이미 작성된 부분은 반복하지 마."
+                                    )
+                                    continue
+                                else:
+                                    break
+
+                            return full_text
                         except Exception as e:
                             if any(k in str(e) for k in ["503", "429", "UNAVAILABLE", "Overloaded"]):
                                 time.sleep(5)
@@ -259,16 +292,39 @@ with tab_main:
                                 raise e
                     raise Exception("Gemini API 재시도 횟수 초과")
 
+                # ------------------------------------------------
+                # Claude 호출 (잘림 감지 + 자동 이어받기)
+                # ------------------------------------------------
                 def safe_call_claude(prompt, sys_prompt):
                     for attempt in range(1, 6):
                         try:
-                            res = claude_client.messages.create(
-                                model=st.session_state.claude_model,
-                                max_tokens=8000,
-                                system=sys_prompt,
-                                messages=[{"role": "user", "content": prompt}]
-                            )
-                            return "\n".join([b.text for b in res.content if getattr(b, 'type', None) == 'text'])
+                            messages = [{"role": "user", "content": prompt}]
+                            full_text = ""
+
+                            for round_i in range(MAX_CONTINUATION_ROUNDS):
+                                res = claude_client.messages.create(
+                                    model=st.session_state.claude_model,
+                                    max_tokens=MAX_OUTPUT_TOKENS_CLAUDE,
+                                    system=sys_prompt,
+                                    messages=messages
+                                )
+                                chunk_text = "\n".join(
+                                    [b.text for b in res.content if getattr(b, 'type', None) == 'text']
+                                )
+                                full_text += chunk_text
+
+                                if res.stop_reason == "max_tokens":
+                                    status_container.write(f"✂️ Claude 응답이 길어 이어서 생성 중... ({round_i + 1}회차)")
+                                    messages = [
+                                        {"role": "user", "content": prompt},
+                                        {"role": "assistant", "content": full_text},
+                                        {"role": "user", "content": "이어서 계속 작성해줘. 이미 작성된 부분은 반복하지 마."}
+                                    ]
+                                    continue
+                                else:
+                                    break
+
+                            return full_text
                         except Exception as e:
                             if any(k in str(e) for k in ["429", "529", "overloaded"]):
                                 time.sleep(5)
@@ -365,4 +421,5 @@ with tab_troubleshoot:
     | **`404 NOT_FOUND`** | 잘못된 모델명 입력 | 사이드바 재설정 후 정확한 모델명 입력 |
     | **`429 / RESOURCE_EXHAUSTED`** | 호출 한도 초과 | 자동으로 대기 후 재시도 수행 |
     | **`503 / UNAVAILABLE`** | 서버 측 과부하 | 10~30초 후 다시 실행 버튼 클릭 |
+    | **응답이 중간에 잘림** | 출력 토큰 한도(`max_tokens`) 초과 | 이번 수정본은 자동으로 감지해 이어서 생성합니다 (최대 3회) |
     """)
